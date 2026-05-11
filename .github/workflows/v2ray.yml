@@ -1,74 +1,52 @@
-name: Xray VPN Server
+name: 3X-UI Panel
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */5 * * *'  
+    - cron: '0 */5 * * *'
 
 jobs:
-  xray:
+  panel:
     runs-on: ubuntu-latest
-    timeout-minutes: 350  
+    timeout-minutes: 350
     
     steps:
-      - name: Install Xray Core
+      - name: Install 3X-UI Panel
         run: |
-          sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
-          
-      - name: Setup Xray Configuration
-        run: |
-          sudo mkdir -p /usr/local/etc/xray
-          sudo tee /usr/local/etc/xray/config.json > /dev/null <<EOF
-          {
-            "inbounds": [{
-              "port": 8080,
-              "protocol": "vless",
-              "settings": {
-                "clients": [{"id": "550e8400-e29b-41d4-a716-446655440000"}],
-                "decryption": "none"
-              },
-              "streamSettings": {
-                "network": "ws",
-                "wsSettings": {"path": "/"}
-              }
-            }],
-            "outbounds": [{"protocol": "freedom"}]
-          }
+          sudo bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) << EOF
+          n
           EOF
+          sleep 10
           
-      - name: Launch Xray Service
+      - name: Start 3X-UI Service
         run: |
-          sudo /usr/local/bin/xray run -c /usr/local/etc/xray/config.json > /tmp/xray.log 2>&1 &
+          sudo x-ui start
           sleep 5
-          echo "✅ Xray service started on port 8080"
-          sudo netstat -tlnp | grep 8080 || echo "⚠️ Port 8080 not listening"
+          sudo systemctl status x-ui --no-pager
+          
+      - name: Get Panel Info
+        run: |
+          PUBLIC_IP=$(curl -s ifconfig.me)
+          echo "=========================================="
+          echo "Panel URL: http://${PUBLIC_IP}:54321"
+          echo "Username: admin"
+          echo "Password: admin"
+          echo "=========================================="
+          echo "Change credentials after first login!"
+          echo "=========================================="
           
       - name: Setup Cloudflare Tunnel
         run: |
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cloudflared-linux-amd64
-          ./cloudflared-linux-amd64 tunnel --url http://localhost:8080 > /tmp/tunnel.log 2>&1 &
-          sleep 15
-          
-      - name: Display Connection Info
-        run: |
-          echo "=========================================="
-          echo "   Cloudflare Tunnel Active"
-          echo "=========================================="
+          ./cloudflared-linux-amd64 tunnel --url http://localhost:54321 > /tmp/tunnel.log 2>&1 &
+          sleep 10
           TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/tunnel.log | head -1)
-          TUNNEL_HOST=$(echo $TUNNEL_URL | sed 's|https://||')
-          
-          echo "Tunnel URL: $TUNNEL_URL"
-          echo ""
-          echo "📱 VLESS Connection Link:"
-          echo "vless://550e8400-e29b-41d4-a716-446655440000@${TUNNEL_HOST}:443?encryption=none&security=tls&type=ws&path=%2F#XrayGitHub"
-          echo ""
           echo "=========================================="
-          echo "Server will run for ~6 hours"
+          echo "Public Panel Access: $TUNNEL_URL"
           echo "=========================================="
           
-      - name: Keep Server Running
+      - name: Keep Panel Running
         run: |
-          echo "⏳ Server active - waiting for timeout..."
-          tail -f /tmp/xray.log &
+          tail -f /tmp/tunnel.log &
           sleep 21000
