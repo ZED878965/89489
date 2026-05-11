@@ -1,0 +1,65 @@
+name: Xray VPN Server
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */5 * * *'  # هر 5 ساعت restart
+
+jobs:
+  xray:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350  # ~6 ساعت
+    
+    steps:
+      - name: Install Xray
+        run: |
+          bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+          
+      - name: Configure Xray
+        run: |
+          sudo mkdir -p /usr/local/etc/xray
+          sudo tee /usr/local/etc/xray/config.json > /dev/null <<EOF
+          {
+            "inbounds": [{
+              "port": 8080,
+              "protocol": "vless",
+              "settings": {
+                "clients": [{"id": "550e8400-e29b-41d4-a716-446655440000"}],
+                "decryption": "none"
+              },
+              "streamSettings": {
+                "network": "ws",
+                "wsSettings": {"path": "/"}
+              }
+            }],
+            "outbounds": [{"protocol": "freedom"}]
+          }
+          EOF
+          
+      - name: Start Xray
+        run: |
+          sudo xray run -c /usr/local/etc/xray/config.json > /tmp/xray.log 2>&1 &
+          sleep 5
+          echo "Xray started on port 8080"
+          
+      - name: Expose via Cloudflare Tunnel
+        run: |
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared-linux-amd64
+          ./cloudflared-linux-amd64 tunnel --url http://localhost:8080 > /tmp/tunnel.log 2>&1 &
+          sleep 10
+          
+      - name: Get Tunnel URL
+        run: |
+          echo "=== Cloudflare Tunnel URL ==="
+          grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/tunnel.log | head -1
+          echo "============================"
+          echo ""
+          echo "VLESS Link:"
+          TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/tunnel.log | head -1 | sed 's|https://||')
+          echo "vless://550e8400-e29b-41d4-a716-446655440000@${TUNNEL_URL}:443?encryption=none&security=tls&type=ws&path=%2F#XrayGitHub"
+          
+      - name: Keep Alive
+        run: |
+          echo "Server running for 6 hours..."
+          sleep 21000
