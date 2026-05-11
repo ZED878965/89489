@@ -3,19 +3,19 @@ name: Xray VPN Server
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */5 * * *'  # هر 5 ساعت restart
+    - cron: '0 */5 * * *'  
 
 jobs:
   xray:
     runs-on: ubuntu-latest
-    timeout-minutes: 350  # ~6 ساعت
+    timeout-minutes: 350  
     
     steps:
-      - name: Install Xray
+      - name: Install Xray Core
         run: |
-          bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+          sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
           
-      - name: Configure Xray
+      - name: Setup Xray Configuration
         run: |
           sudo mkdir -p /usr/local/etc/xray
           sudo tee /usr/local/etc/xray/config.json > /dev/null <<EOF
@@ -36,30 +36,39 @@ jobs:
           }
           EOF
           
-      - name: Start Xray
+      - name: Launch Xray Service
         run: |
-          sudo xray run -c /usr/local/etc/xray/config.json > /tmp/xray.log 2>&1 &
+          sudo /usr/local/bin/xray run -c /usr/local/etc/xray/config.json > /tmp/xray.log 2>&1 &
           sleep 5
-          echo "Xray started on port 8080"
+          echo "✅ Xray service started on port 8080"
+          sudo netstat -tlnp | grep 8080 || echo "⚠️ Port 8080 not listening"
           
-      - name: Expose via Cloudflare Tunnel
+      - name: Setup Cloudflare Tunnel
         run: |
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cloudflared-linux-amd64
           ./cloudflared-linux-amd64 tunnel --url http://localhost:8080 > /tmp/tunnel.log 2>&1 &
-          sleep 10
+          sleep 15
           
-      - name: Get Tunnel URL
+      - name: Display Connection Info
         run: |
-          echo "=== Cloudflare Tunnel URL ==="
-          grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/tunnel.log | head -1
-          echo "============================"
+          echo "=========================================="
+          echo "   Cloudflare Tunnel Active"
+          echo "=========================================="
+          TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/tunnel.log | head -1)
+          TUNNEL_HOST=$(echo $TUNNEL_URL | sed 's|https://||')
+          
+          echo "Tunnel URL: $TUNNEL_URL"
           echo ""
-          echo "VLESS Link:"
-          TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/tunnel.log | head -1 | sed 's|https://||')
-          echo "vless://550e8400-e29b-41d4-a716-446655440000@${TUNNEL_URL}:443?encryption=none&security=tls&type=ws&path=%2F#XrayGitHub"
+          echo "📱 VLESS Connection Link:"
+          echo "vless://550e8400-e29b-41d4-a716-446655440000@${TUNNEL_HOST}:443?encryption=none&security=tls&type=ws&path=%2F#XrayGitHub"
+          echo ""
+          echo "=========================================="
+          echo "Server will run for ~6 hours"
+          echo "=========================================="
           
-      - name: Keep Alive
+      - name: Keep Server Running
         run: |
-          echo "Server running for 6 hours..."
+          echo "⏳ Server active - waiting for timeout..."
+          tail -f /tmp/xray.log &
           sleep 21000
